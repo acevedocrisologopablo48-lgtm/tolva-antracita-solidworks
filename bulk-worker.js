@@ -60,10 +60,10 @@ function simulate(settings, send) {
     const lane = i % 20, layer = Math.floor(i / 20) % 3, wave = Math.floor(i / 60);
     release[i] = 0.012 + 0.069 * wave + 0.022 * random01(i, 36);
     y[i] = (lane - 9.5) * 0.136 + 0.02 * (random01(i, 30) - 0.5) + 0.017 * Math.sin(0.7 * wave);
-    x[i] = -2.012 + 0.026 * (random01(i, 31) - 0.5);
+    x[i] = 2.012 + 0.026 * (random01(i, 31) - 0.5);
     z[i] = 3.799 + 0.115 * layer + 0.018 * (random01(i, 32) - 0.5);
     vy[i] = 0.12 * (random01(i, 33) - 0.5);
-    vx[i] = 1.59 + 0.32 * random01(i, 34);
+    vx[i] = -1.59 - 0.32 * random01(i, 34);
     vz[i] = -0.43 - 0.22 * random01(i, 35);
   }
 
@@ -105,10 +105,10 @@ function simulate(settings, send) {
   function contain(i) {
     const px = x[i], py = y[i], pz = z[i], rad = r[i];
     if (pz - rad < 4.30 && pz > OUTLET - rad) {
-      wall(i, -1, 0, 0, px - HALF + rad, p.wallFriction);
+      wall(i, 1, 0, 0, -HALF + rad - px, p.wallFriction);
       wall(i, 0, 1, 0, -HALF + rad - py, p.wallFriction);
       wall(i, 0, -1, 0, py - HALF + rad, p.wallFriction);
-      if (entered[i] && pz < LIP) wall(i, 1, 0, 0, -HALF + rad - px, p.wallFriction);
+      if (entered[i] && pz < LIP) wall(i, -1, 0, 0, px - HALF + rad, p.wallFriction);
     }
     if (!entered[i] || z[i] > LIP + rad || z[i] < OUTLET - rad) return;
     const friction = p.wallFriction + p.rollingLoss;
@@ -219,7 +219,7 @@ function simulate(settings, send) {
       vz[i]-=GRAVITY*STEP;
       x[i]+=vx[i]*STEP; y[i]+=vy[i]*STEP; z[i]+=vz[i]*STEP;
       if(state[i]===1) {
-        if(!entered[i] && x[i]>=-HALF) {entered[i]=1;approach-=m[i];}
+        if(!entered[i] && x[i]<=HALF) {entered[i]=1;approach-=m[i];}
         contain(i);
         if(z[i]<=OUTLET) {
           if(entered[i] && Math.abs(x[i])<=0.60001 && Math.abs(y[i])<=0.40001) {

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "./vendor/OrbitControls.js";
-import { createBulkMaterial } from "./bulk-material.js?v=granel2";
+import { createBulkMaterial } from "./bulk-material.js?v=granel3";
 
 const byId = id => document.getElementById(id);
 const host = byId("canvasHost");
@@ -15,7 +15,7 @@ let frames = [], buffer, duration = 0, activeRequest, revision = 0;
 let now = 0, frameIndex = 0, running = false, ready = false, previous = 0;
 const meshCache = new Map();
 const target = new THREE.Vector3(0, 0, 2.15);
-const eye = new THREE.Vector3(-1.18, -0.72, 1.2).normalize().multiplyScalar(12);
+const eye = new THREE.Vector3(1.18, -0.72, 1.2).normalize().multiplyScalar(12);
 const spanishMass = new Intl.NumberFormat("es", {useGrouping: "always", maximumFractionDigits: 0});
 const spanishTime = new Intl.NumberFormat("es", {minimumFractionDigits:2, maximumFractionDigits:2});
 
@@ -183,7 +183,7 @@ async function fetchChecked(url,signal) {
 function selected(name) {return document.querySelector('input[name="'+name+'"]:checked').value;}
 function computeCase(parameters, signal) {
   return new Promise((resolve, reject) => {
-    const task = new Worker(new URL("./bulk-worker.js?v=granel2", import.meta.url));
+    const task = new Worker(new URL("./bulk-worker.js?v=granel3", import.meta.url));
     const result = [];
     const abort = () => finish(() => reject(new DOMException("Carga cancelada", "AbortError")));
     const finish = callback => {
@@ -241,13 +241,13 @@ async function loadCase() {
   byId("modelTitle").textContent = variant.selectedOptions[0].textContent;
   bulkMaterial.setGrainSize(parameters.diameter);
   bulkMaterial.setHopperHeight(parameters.height);
-  byId("cadDownload").href = "./assets/solidworks/tolva-" + h + ".SLDPRT?v=granel2";
+  byId("cadDownload").href = "./assets/solidworks/tolva-" + h + ".SLDPRT?v=granel3";
   setTime(0);
   showStatus("Preparando la descarga de 1 tonelada…");
 
   try {
     const geometry = meshCache.has(h) ? Promise.resolve(meshCache.get(h))
-      : fetchChecked("./assets/models/tolva-" + h + ".json?v=granel2", controller.signal)
+      : fetchChecked("./assets/models/tolva-" + h + ".json?v=granel3", controller.signal)
         .then(r => r.json())
         .then(meshFromFile);
     const simulation = computeCase(parameters, controller.signal);
