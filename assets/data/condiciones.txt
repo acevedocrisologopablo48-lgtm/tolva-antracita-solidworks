@@ -1,0 +1,20 @@
+SIMULACIÓN DEL DESPLAZAMIENTO DE ANTRACITA
+
+Cómo abrir el resultado
+En SOLIDWORKS, elija Herramientas > Macro > Ejecutar > Reproducir antracita.swb. Seleccione pared, granulometría, humedad y densidad, y pulse Reproducir. La barra permite revisar cualquier instante. Los marcadores se amplían para verlos a través de la plancha. Abra «Resumen.csv» para consultar los 24 resultados. Para repetir el cálculo en SOLIDWORKS, elija Herramientas > Macro > Ejecutar > Recalcular antracita.swb. Mantenga la biblioteca y la carpeta Datos junto a la macro.
+
+Qué se simuló
+Se combinaron la geometría original de 900 mm y las propuestas de 300 y 200 mm, las granulometrías de 0–3 y 0–6 mm, las humedades de 5 y 9 % y las densidades de grano confirmadas de 1,6 y 1,8 g/ml. Un motor propio de contacto granular, ejecutado desde la macro dentro de SOLIDWORKS, siguió cada grano durante un máximo de 3 s. Se usaron las caras interiores del modelo, incluidas las diagonales de los paños laterales.
+
+El pulso entra por el lado abierto en tres grupos de 80 granos, a 1,36 m/s hacia el interior y 0,10 m/s hacia abajo. Masa total por caso de 1,70 a 15,28 g. Se supusieron granos esféricos con igual número de partículas en cinco diámetros (10, 25, 50, 75 y 100 % del máximo). Los finos inferiores a 0,30 y 0,60 mm, respectivamente, quedan fuera de la muestra.
+
+Hipótesis de contacto
+Restitución 0,50. Fricción de deslizamiento grano/grano y grano/acero de 0,80 y 0,60, y de rodadura de 0,05 y 0,02. Referencia de carbón húmedo: Gao et al., tabla 1 (https://doi.org/10.1002/eng2.13046). Se supuso una atracción Fmáx = 2πR*γ, con γ = 0,00015 y 0,00060 N/m a 5 y 9 % de humedad. La fuerza cae linealmente a cero a una separación de 0,04 radios reducidos y se reduce a la mitad en acero. La ley de humedad requiere calibración con la antracita del proyecto.
+
+Resultados
+En la base cruzaron la salida entre 236 y 239 de los 240 granos, y el 90 % de la masa cruzó entre 1,067 y 1,151 s. En las propuestas cruzaron entre 238 y 240 granos, y el 90 % de la masa pasó entre 1,048 y 1,083 s. «Resumen.csv» presenta las masas y los tiempos al 10, 50 y 90 % por caso. Se integró con paso de 0,00005 s y se guardaron posiciones cada 0,04 s. Al reducir el paso a la mitad en cuatro casos, el t90 cambió como máximo un 1,12 %.
+
+El alcance es el desplazamiento de una muestra dispersa. Comparar caudal, atascos y remanentes de una carga completa requiere representar el volumen del cucharón, el tamizado y los contactos medidos del material.
+
+
+
