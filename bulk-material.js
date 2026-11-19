@@ -20,16 +20,9 @@ const vesselClip = `
   uniform float collar, clipVessel;
   bool crossesWall(vec3 p) {
     if(clipVessel<0.5 || p.z<1.6 || p.z>3.3) return false;
-    float rise=3.3-collar-2.4;
-    float xmin=-0.6-1.125*clamp((p.z-1.6)/0.8,0.0,1.0);
-    float xmax=0.6+1.125*clamp((p.z-1.6)/(0.8+rise),0.0,1.0);
-    if(p.x<xmin || p.x>xmax || abs(p.y)>1.725) return true;
-    float y=abs(p.y);
-    if(y<=0.4) return false;
-    float v=(y-0.4)/1.325;
-    float u=clamp(.5+p.x/(1.2+2.25*v),0.0,1.0);
-    float wall=1.6+v*(.8+rise*u);
-    return p.z<wall;
+    float fraction=clamp((p.z-1.6)/(1.7-collar),0.0,1.0);
+    vec2 halfWidth=mix(vec2(.6,.4),vec2(1.725),fraction);
+    return any(greaterThan(abs(p.xy),halfWidth));
   }
 `;
 const surfaceVertex=`

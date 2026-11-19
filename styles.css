@@ -26,3 +26,21 @@
   .mass-balance { gap: .4rem .9rem; }
   .mass-balance div { font-size: .8rem; }
 }
+
+.geometry-data {
+  margin: .85rem 0 .35rem;
+  font-size: .84rem;
+}
+.geometry-data div {
+  display: flex;
+  justify-content: space-between;
+  gap: .6rem;
+  padding: .28rem 0;
+}
+.geometry-data dt { color: #466070; }
+.geometry-data dd {
+  margin: 0;
+  white-space: nowrap;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}

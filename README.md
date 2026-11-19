@@ -4,7 +4,15 @@ Visor interactivo de las geometrías de 900, 300 y 200 mm, exportadas de las pie
 
 ## Descarga de una tonelada
 
-Las mallas conservan las aristas y los colores del CAD, con coordenadas en metros y eje Z vertical. La entrada sin alerón y la pared modificada están en el mismo extremo, X positivo. El embudo tiene cuatro paños. En las propuestas, cada lateral alabeado es una superficie reglada continua de 9,525 mm de espesor. La alimentación dura aproximadamente 1,35 s y la simulación abarca 8 s.
+La entrada sin alerón está en el extremo X positivo. El collar vertical mide lo mismo en sus cuatro lados y el embudo tiene cuatro caras planas de 9,525 mm de espesor. El cuerpo mide 1700 mm desde la salida hasta el borde de carga. La alimentación dura aproximadamente 1,35 s y la simulación abarca 8 s.
+
+| Paredes verticales | Altura del embudo | Volumen interior | Cambio frente a 900 mm | Frente y fondo (±X) | Laterales (±Y) |
+|---|---:|---:|---:|---:|---:|
+| 900 mm | 800 mm | 15,062 m³ | Base | 35,42° | 31,12° |
+| 300 mm | 1400 mm | 11,183 m³ | −3,879 m³ (−25,75 %) | 51,22° | 46,58° |
+| 200 mm | 1500 mm | 10,537 m³ | −4,526 m³ (−30,05 %) | 53,13° | 48,54° |
+
+Los ángulos se miden desde la horizontal. El volumen interior suma el collar y el embudo hasta el borde de carga a Z = 3300 mm. Se calcula con la boca de 3450 × 3450 mm y la salida de 1200 × 800 mm. El espacio entre los alerones queda fuera de la capacidad indicada.
 
 El motor del navegador calcula las 24 combinaciones de tres geometrías, granulometría de 0–3 y 0–6 mm, humedad de 5 y 9 % y densidad de grano de 1600 y 1800 kg/m³. Representa los 1000 kg con 1200 grupos de granos. El volumen sólido se obtiene a partir de la masa y la densidad de partícula. El contacto normal tiene restitución cero y la fricción disipa el movimiento tangencial. Las dos granulometrías y humedades modifican la resistencia y la cohesión efectivas del conjunto. Esos coeficientes son supuestos.
 

@@ -36,7 +36,10 @@ function parameters(opts) {
 
 function simulate(settings, send) {
   const p = parameters(settings);
-  const riseDifference = 0.900 - p.height / 1000;
+  // Fixed 1.700 m body. Changing the uniform collar raises all four upper cone corners.
+  const rise = 1.700 - p.height / 1000;
+  const slopeX = rise / 1.125, slopeY = rise / 1.325;
+  const nzX = 1 / Math.sqrt(1 + slopeX * slopeX), nzY = 1 / Math.sqrt(1 + slopeY * slopeY);
   const x = new Float64Array(COUNT), y = new Float64Array(COUNT), z = new Float64Array(COUNT);
   const vx = new Float64Array(COUNT), vy = new Float64Array(COUNT), vz = new Float64Array(COUNT);
   const r = new Float64Array(COUNT), m = new Float64Array(COUNT);
@@ -113,44 +116,25 @@ function simulate(settings, send) {
     if (!entered[i] || z[i] > LIP + rad || z[i] < OUTLET - rad) return;
     const friction = p.wallFriction + p.rollingLoss;
 
-    // Planar end panels. The projection test clips the plane to its actual trapezoid.
+    // The frustum has four planar trapezoids and a level upper edge. Normal projections
+    // are clipped to each trapezoid so the outlet remains open at Z = 1.600 m.
     const sx = x[i] < 0 ? -1 : 1;
-    const slope = (0.8 + (sx > 0 ? riseDifference : 0)) / 1.125;
-    const invLength = 1 / Math.sqrt(1 + slope * slope);
-    const nx = -sx * slope * invLength, nz = invLength;
-    const distance = (z[i] - OUTLET - slope * (sx * x[i] - 0.600)) * nz;
-    if (distance < rad) {
-      const t = (sx * (x[i] - nx * distance) - 0.600) / 1.125;
+    const nx = -sx * slopeX * nzX;
+    const distX = (z[i] - OUTLET - slopeX * (sx*x[i] - 0.600)) * nzX;
+    if (distX < rad) {
+      const t = (sx*(x[i] - nx*distX) - 0.600)/1.125;
       if (t >= 0 && t <= 1 && Math.abs(y[i]) <= 0.400 + 1.325*t + 1e-8) {
-        wall(i, nx, 0, nz, rad - distance, friction);
+        wall(i, nx, 0, nzX, rad-distX, friction);
       }
     }
-
-    // These are the actual ruled side panels; the contact normal follows the continuous loft.
-    // S(x,y) = (x, y, 1.600 + t * (0.800 + delta * u)).
-    // Project the center to the local tangent, refit that tangent at the projected point,
-    // and iterate to obtain the perpendicular foot on the curved sheet.
     const sy = y[i] < 0 ? -1 : 1;
-    if (Math.abs(y[i]) < 0.400 - rad) return;
-    let qx=x[i], qy=y[i], u=0, t=0, dx=0, dy=0, dz=1, d=0;
-    for (let pass=0; pass<4; pass++) {
-      t = (sy*qy - 0.400)/1.325;
-      if (t < -0.15 || t > 1.15) return;
-      const halfWidth = 0.600 + 1.125*t;
-      u = 0.5 + qx/(2*halfWidth);
-      const surfaceZ = OUTLET + t*(0.800 + riseDifference*u);
-      const fx = riseDifference*t/(2*halfWidth);
-      const fy = sy/1.325*(0.800 + riseDifference*u - t*riseDifference*qx*1.125/(2*halfWidth*halfWidth));
-      dz = 1/Math.sqrt(1 + fx*fx + fy*fy);
-      dx = -fx*dz; dy = -fy*dz;
-      d = (x[i]-qx)*dx + (y[i]-qy)*dy + (z[i]-surfaceZ)*dz;
-      if (pass === 0 && d > rad + 0.015) return;
-      const xNext = x[i] - d*dx, yNext = y[i] - d*dy;
-      if (Math.abs(xNext-qx) + Math.abs(yNext-qy) < 1e-8) break;
-      qx=xNext; qy=yNext;
-    }
-    if (d < rad && t >= -1e-8 && t <= 1+1e-8 && u >= -1e-8 && u <= 1+1e-8) {
-      wall(i, dx, dy, dz, rad-d, friction);
+    const ny = -sy * slopeY * nzY;
+    const distY = (z[i] - OUTLET - slopeY * (sy*y[i] - 0.400)) * nzY;
+    if (distY < rad) {
+      const t = (sy*(y[i] - ny*distY) - 0.400)/1.325;
+      if (t >= 0 && t <= 1 && Math.abs(x[i]) <= 0.600 + 1.125*t + 1e-8) {
+        wall(i, 0, ny, nzY, rad-distY, friction);
+      }
     }
   }
 

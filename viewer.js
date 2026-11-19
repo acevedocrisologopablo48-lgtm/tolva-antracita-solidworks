@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "./vendor/OrbitControls.js";
-import { createBulkMaterial } from "./bulk-material.js?v=granel3";
+import { createBulkMaterial } from "./bulk-material.js?v=simetrica";
 
 const byId = id => document.getElementById(id);
 const host = byId("canvasHost");
@@ -18,6 +18,31 @@ const target = new THREE.Vector3(0, 0, 2.15);
 const eye = new THREE.Vector3(1.18, -0.72, 1.2).normalize().multiplyScalar(12);
 const spanishMass = new Intl.NumberFormat("es", {useGrouping: "always", maximumFractionDigits: 0});
 const spanishTime = new Intl.NumberFormat("es", {minimumFractionDigits:2, maximumFractionDigits:2});
+
+const opening = 3.45;
+const outletX = 1.2;
+const outletY = 0.8;
+const bodyHeight = 1.7;
+const throatArea = outletX * outletY;
+const midArea = (opening + outletX) * (opening + outletY) / 4;
+const entryArea = opening * opening;
+const averageFunnelArea = (throatArea + 4 * midArea + entryArea) / 6;
+
+function volumeAt(collarHeight) {
+  return entryArea * collarHeight + averageFunnelArea * (bodyHeight - collarHeight);
+}
+
+function showGeometry(heightMillimetres) {
+  const collarHeight = heightMillimetres / 1000;
+  const rise = bodyHeight - collarHeight;
+  const volume = volumeAt(collarHeight);
+  const change = 100 * (volume / volumeAt(.9) - 1);
+  const angle = run => Math.atan2(rise, run) * 180 / Math.PI;
+  byId("bodyVolume").textContent = spanishTime.format(volume) + " m³";
+  byId("volumeChange").textContent = spanishTime.format(change) + " %";
+  byId("endSlope").textContent = spanishTime.format(angle((opening - outletX) / 2)) + "°";
+  byId("sideSlope").textContent = spanishTime.format(angle((opening - outletY) / 2)) + "°";
+}
 
 function showStatus(message, retry = false) {
   status.hidden = !message;
@@ -183,7 +208,7 @@ async function fetchChecked(url,signal) {
 function selected(name) {return document.querySelector('input[name="'+name+'"]:checked').value;}
 function computeCase(parameters, signal) {
   return new Promise((resolve, reject) => {
-    const task = new Worker(new URL("./bulk-worker.js?v=granel3", import.meta.url));
+    const task = new Worker(new URL("./bulk-worker.js?v=simetrica", import.meta.url));
     const result = [];
     const abort = () => finish(() => reject(new DOMException("Carga cancelada", "AbortError")));
     const finish = callback => {
@@ -239,15 +264,16 @@ async function loadCase() {
     model = null;
   }
   byId("modelTitle").textContent = variant.selectedOptions[0].textContent;
+  showGeometry(parameters.height);
   bulkMaterial.setGrainSize(parameters.diameter);
   bulkMaterial.setHopperHeight(parameters.height);
-  byId("cadDownload").href = "./assets/solidworks/tolva-" + h + ".SLDPRT?v=granel3";
+  byId("cadDownload").href = "./assets/solidworks/tolva-" + h + ".SLDPRT?v=simetrica";
   setTime(0);
   showStatus("Preparando la descarga de 1 tonelada…");
 
   try {
     const geometry = meshCache.has(h) ? Promise.resolve(meshCache.get(h))
-      : fetchChecked("./assets/models/tolva-" + h + ".json?v=granel3", controller.signal)
+      : fetchChecked("./assets/models/tolva-" + h + ".json?v=simetrica", controller.signal)
         .then(r => r.json())
         .then(meshFromFile);
     const simulation = computeCase(parameters, controller.signal);

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#143046">
   <title>Tolva de antracita · BRIQ</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css?v=granel3">
+  <link rel="stylesheet" href="./styles.css?v=simetrica">
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body>
@@ -15,10 +15,17 @@
   <aside class="panel" aria-label="Configuración del estudio">
     <section>
       <h2>Geometría</h2>
-      <label for="variant">Altura de la plancha modificada</label>
+      <label for="variant">Altura de las cuatro paredes verticales</label>
       <select id="variant"><option value="900">Base · 900 mm</option><option value="300">Propuesta · 300 mm</option><option value="200">Propuesta · 200 mm</option></select>
-      <p class="note">La carga entra por el lado de esta plancha.</p>
-      <a id="cadDownload" class="cad-link" href="./assets/solidworks/tolva-900.SLDPRT?v=granel3" download>Archivo SOLIDWORKS</a>
+      <p class="note">Cuerpo de 1700 mm. Carga por el lado sin alerón.</p>
+      <a id="cadDownload" class="cad-link" href="./assets/solidworks/tolva-900.SLDPRT?v=simetrica" download>Archivo SOLIDWORKS</a>
+      <dl class="geometry-data">
+        <div><dt>Volumen del cuerpo</dt><dd id="bodyVolume">15,06 m³</dd></div>
+        <div><dt>Cambio frente a la base</dt><dd id="volumeChange">0,00 %</dd></div>
+        <div><dt>Inclinación frente y fondo</dt><dd id="endSlope">35,42°</dd></div>
+        <div><dt>Inclinación laterales</dt><dd id="sideSlope">31,12°</dd></div>
+      </dl>
+      <p class="note">Ángulos desde la horizontal. Volumen hasta el borde de carga.</p>
     </section>
     <section>
       <h2>Material</h2>
@@ -70,7 +77,7 @@
   </div>
 </main>
 <noscript>Activa JavaScript para utilizar el visor.</noscript>
-<script type="module" src="./viewer.js?v=granel3"></script>
+<script type="module" src="./viewer.js?v=simetrica"></script>
 </body>
 </html>
 
