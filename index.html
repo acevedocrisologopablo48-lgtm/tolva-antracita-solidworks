@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#143046">
   <title>Tolva de antracita · BRIQ</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=granel1">
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body>
@@ -36,35 +36,39 @@
     <section>
       <h2>Visualización</h2>
       <label class="switch"><input id="transparent" type="checkbox"><span class="track"></span><span>Planchas transparentes</span></label>
-      <label class="switch"><input id="markers" type="checkbox" checked><span class="track"></span><span>Ampliar marcadores</span></label>
-      <p class="note">Los marcadores ampliados se ven a través de las planchas. Desactívalos para ver los granos a tamaño real.</p>
     </section>
-    <p class="scope">Muestra de 240 granos. Los parámetros de contacto y el efecto de la humedad son supuestos del modelo.</p>
+    <p class="scope">Simulación a granel con grupos de granos. Fricción y humedad sin calibración de campo.</p>
   </aside>
   <div class="work">
     <section class="viewport" id="viewport" aria-label="Vista 3D interactiva de la tolva">
       <div id="canvasHost"></div>
-      <div class="viewtitle"><h2 id="modelTitle">Base · 900 mm</h2><span>Vista ortográfica</span></div>
+      <div class="viewtitle"><h2 id="modelTitle">Base · 900 mm</h2><span>Carga frontal de 1 tonelada</span></div>
       <button class="fit iconbtn" type="button" id="fit" title="Restablecer vista 3D" aria-label="Restablecer vista 3D">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg>
       </button>
-      <div class="message" id="status" role="status"><span id="statusText">Cargando modelo y simulación…</span> <button id="retry" hidden type="button">Reintentar</button></div>
+      <div class="message" id="status" role="status"><span id="statusText">Preparando la descarga…</span> <button id="retry" hidden type="button">Reintentar</button></div>
       <div class="viewport-foot"><span class="anth"><i></i>Antracita</span><span class="hint"><span class="mouse">Arrastra para girar · botón derecho para desplazar · rueda para acercar</span><span class="touch">Un dedo para girar · dos para desplazar y acercar</span></span></div>
     </section>
     <section class="playback" aria-label="Reproducción de la simulación">
-      <div class="playhead"><h2>Desplazamiento</h2><span id="counter">— / 240 granos descargados</span></div>
+      <div class="playhead"><h2>Descarga de antracita</h2><span id="phase">Preparando el ciclo</span></div>
+      <dl class="mass-balance" aria-label="Balance de material">
+        <div><dt>Vertido</dt><dd id="loadedMass">0 / 1 000 kg</dd></div>
+        <div><dt>En tránsito</dt><dd id="insideMass">0 kg</dd></div>
+        <div><dt>Por la salida</dt><dd id="outMass">0 kg</dd></div>
+        <div id="spill" hidden><dt>Derramado</dt><dd id="spillMass">0 kg</dd></div>
+      </dl>
       <div class="transport">
         <button id="play" class="play" type="button" disabled><span id="playGlyph" class="play-glyph"></span><span id="playLabel">Reproducir</span></button>
         <button id="rewind" class="iconbtn" type="button" title="Volver al inicio" aria-label="Volver al inicio" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 5v5h5"/></svg></button>
-        <input id="time" type="range" min="0" max="3" step="0.001" value="0" aria-label="Instante de la simulación en segundos" disabled>
-        <output id="clock" for="time">0,00 / 3,00 s</output>
+        <input id="time" type="range" min="0" max="1" step="0.001" value="0" aria-label="Instante de la simulación en segundos" disabled>
+        <output id="clock" for="time">0,00 s</output>
         <select id="speed" aria-label="Velocidad de reproducción"><option value=".25">0,25×</option><option value=".5">0,5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
       </div>
     </section>
   </div>
 </main>
 <noscript>Activa JavaScript para utilizar el visor.</noscript>
-<script type="module" src="./viewer.js"></script>
+<script type="module" src="./viewer.js?v=granel1"></script>
 </body>
 </html>
 

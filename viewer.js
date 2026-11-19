@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "./vendor/OrbitControls.js";
+import { createBulkMaterial } from "./bulk-material.js?v=granel1";
 
 const byId = id => document.getElementById(id);
 const host = byId("canvasHost");
@@ -7,20 +8,15 @@ const status = byId("status");
 const variant = byId("variant");
 const timeInput = byId("time");
 const playButton = byId("play");
-const markers = byId("markers");
 const transparent = byId("transparent");
-const TOTAL_TIME = 3;
-const CAPACITY = 240;
-let renderer, camera, controls, scene, model;
-let markerPoints, actualGrains, trails, markPositions, tailPositions;
-let tracks = [], activeRequest, revision = 0;
-let now = 0, running = false, ready = false, previous = 0;
+const LOAD_MASS = 1000;
+let renderer, camera, controls, scene, model, bulkMaterial;
+let frames = [], buffer, duration = 0, activeRequest, revision = 0;
+let now = 0, frameIndex = 0, running = false, ready = false, previous = 0;
 const meshCache = new Map();
-const dataCache = new Map();
-const dim = new THREE.Vector2();
-const matrix = new THREE.Matrix4();
 const target = new THREE.Vector3(0, 0, 2.15);
 const eye = new THREE.Vector3(0.72, -1.18, 0.82).normalize().multiplyScalar(12);
+const spanishMass = new Intl.NumberFormat("es", {useGrouping: "always", maximumFractionDigits: 0});
 const spanishTime = new Intl.NumberFormat("es", {minimumFractionDigits:2, maximumFractionDigits:2});
 
 function showStatus(message, retry = false) {
@@ -59,7 +55,7 @@ function initScene() {
   key.position.set(-4,-6,9); scene.add(key);
   const fill = new THREE.DirectionalLight(0xf0f7ff,.7);
   fill.position.set(3,4,6); scene.add(fill);
-  createGrains();
+  bulkMaterial = createBulkMaterial(scene, {capacity: 1800, seed: 59});
   new ResizeObserver(resize).observe(host);
   resetView(); resize();
 }
@@ -77,30 +73,7 @@ function resize() {
   camera.top=vertical/2;camera.bottom=-camera.top;
   camera.updateProjectionMatrix();
   renderer.setSize(width,height,false);
-  renderer.getDrawingBufferSize(dim);
   draw();
-}
-function createGrains() {
-  markPositions=new Float32Array(CAPACITY*3);
-  tailPositions=new Float32Array(CAPACITY*6);
-  const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute("position",new THREE.BufferAttribute(markPositions,3).setUsage(THREE.DynamicDrawUsage));
-  geometry.setDrawRange(0,0);
-  const material=new THREE.ShaderMaterial({
-    uniforms:{pixels:{value:6}}, transparent:true,depthTest:false,depthWrite:false,
-    vertexShader:"uniform float pixels; void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);gl_PointSize=pixels;}",
-    fragmentShader:"void main(){float r=length(gl_PointCoord-vec2(0.5));if(r>0.5)discard;vec3 color=mix(vec3(1.0,.733,.149),vec3(.251,.157,.024),smoothstep(.32,.44,r));gl_FragColor=vec4(color,1.0-smoothstep(.44,.51,r));}"
-  });
-  markerPoints=new THREE.Points(geometry,material);
-  markerPoints.frustumCulled=false;markerPoints.renderOrder=5;scene.add(markerPoints);
-  const lines=new THREE.BufferGeometry();
-  lines.setAttribute("position",new THREE.BufferAttribute(tailPositions,3).setUsage(THREE.DynamicDrawUsage));
-  lines.setDrawRange(0,0);
-  trails=new THREE.LineSegments(lines,new THREE.LineBasicMaterial({color:0xdc8b0b,transparent:true,opacity:.8,depthTest:false,depthWrite:false}));
-  trails.frustumCulled=false;trails.renderOrder=4;scene.add(trails);
-  actualGrains=new THREE.InstancedMesh(new THREE.SphereGeometry(1,10,8),new THREE.MeshPhongMaterial({color:0x383c40}),CAPACITY);
-  actualGrains.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  actualGrains.count=0;actualGrains.frustumCulled=false;scene.add(actualGrains);
 }
 function meshFromFile(file) {
   if (!Array.isArray(file.bodies) || !file.bodies.length) throw Error("Archivo de geometría vacío.");
@@ -139,66 +112,65 @@ function setTransparency() {
   }
   draw();
 }
-function parseTracks(csv) {
-  const rows=csv.trim().split(/\r?\n/);
-  if (rows.shift().replace(/^\uFEFF/,"")!=="t_s,id,x_mm,y_mm,z_mm,d_mm,estado") throw Error("Formato de trayectoria desconocido.");
-  const byGrain=new Map();
-  for (const line of rows) {
-    const values=line.split(",").map(Number);
-    if (values.length!==7 || !values.every(Number.isFinite)) throw Error("Trayectoria incompleta.");
-    const [t,id,x,y,z,d,state]=values;
-    if (!byGrain.has(id)) byGrain.set(id,[]);
-    byGrain.get(id).push({t,x:x*.001,y:y*.001,z:z*.001,r:d*.0005,state});
-  }
-  if (byGrain.size!==CAPACITY) throw Error("El caso no contiene los 240 granos.");
-  return Array.from(byGrain.values(),a=>a.sort((x,y)=>x.t-y.t));
+function updateMass(frame) {
+  const loaded = frame?.loaded ?? 0;
+  byId("loadedMass").textContent = `${spanishMass.format(loaded)} / ${spanishMass.format(LOAD_MASS)} kg`;
+  byId("insideMass").textContent = `${spanishMass.format(frame?.inside ?? 0)} kg`;
+  byId("outMass").textContent = `${spanishMass.format(frame?.discharged ?? 0)} kg`;
+  const spilled = frame?.spilled ?? 0;
+  byId("spill").hidden = spilled < .01;
+  byId("spillMass").textContent = `${spanishMass.format(spilled)} kg`;
+  byId("phase").textContent = !ready ? "Preparando el ciclo"
+    : now === 0 ? "Lista para cargar"
+    : now >= duration ? "Fin del ciclo"
+    : loaded < LOAD_MASS - .01 ? "Vertido frontal"
+    : "Descarga por gravedad";
 }
-function positionAt(a,t) {
-  let lo=0, hi=a.length-1;
-  while (lo<hi) {
-    const mid=(lo+hi+1)>>1;
-    if (a[mid].t<=t) lo=mid; else hi=mid-1;
+
+function paintMaterial() {
+  if (!frames.length) {
+    bulkMaterial.setVisible(false);
+    updateMass();
+    return;
   }
-  const p=a[lo], q=a[lo+1];
-  if (!q || t<=p.t) return p;
-  const f=(t-p.t)/(q.t-p.t);
-  return {x:p.x+f*(q.x-p.x),y:p.y+f*(q.y-p.y),z:p.z+f*(q.z-p.z),r:p.r,state:p.state};
+  while (frameIndex > 0 && frames[frameIndex].t > now) frameIndex--;
+  while (frameIndex + 1 < frames.length && frames[frameIndex + 1].t <= now) frameIndex++;
+  const frame = frames[frameIndex];
+  const next = frames[frameIndex + 1];
+  const from = frame.positions;
+  const to = next?.positions;
+  const fraction = next ? (now - frame.t) / (next.t - frame.t) : 0;
+  if (!buffer || buffer.length !== from.length) buffer = new Float32Array(from.length);
+  buffer.set(from);
+  if (fraction > 0 && to) {
+    for (let i = 0; i < from.length; i += 4) {
+      if (!from[i+3] || !to[i+3]) continue;
+      buffer[i] += (to[i] - from[i]) * fraction;
+      buffer[i+1] += (to[i+1] - from[i+1]) * fraction;
+      buffer[i+2] += (to[i+2] - from[i+2]) * fraction;
+    }
+  }
+  bulkMaterial.setVisible(true);
+  bulkMaterial.update(buffer, buffer.length / 4);
+  updateMass(frame);
 }
-function paintParticles() {
-  if (!markerPoints) return;
-  let visible=0, exited=0;
-  for (const samples of tracks) {
-    if (now<samples[0].t) continue;
-    const p=positionAt(samples,now);
-    if (p.state) { if(p.state===1)exited++; continue; }
-    const i=visible++;
-    markPositions.set([p.x,p.y,p.z],3*i);
-    const old=positionAt(samples,Math.max(0,now-.085));
-    tailPositions.set([old.x,old.y,old.z,p.x,p.y,p.z],6*i);
-    matrix.makeScale(p.r,p.r,p.r);matrix.setPosition(p.x,p.y,p.z);actualGrains.setMatrixAt(i,matrix);
-  }
-  actualGrains.count=visible;actualGrains.instanceMatrix.needsUpdate=true;
-  actualGrains.visible=!markers.checked;
-  for(const [obj,count] of [[markerPoints,visible],[trails,2*visible]]){
-    obj.geometry.attributes.position.needsUpdate=true;obj.geometry.setDrawRange(0,count);obj.visible=markers.checked;
-  }
-  byId("counter").textContent=ready?exited+" / "+CAPACITY+" granos descargados":"— / 240 granos descargados";
-}
+
 function draw() {
-  if (!renderer || !camera || !markerPoints) return;
-  markerPoints.material.uniforms.pixels.value=6*renderer.getPixelRatio();
-  renderer.render(scene,camera);
+  if (renderer && camera) renderer.render(scene, camera);
 }
+
 function setTime(value) {
-  now=Math.max(0,Math.min(TOTAL_TIME,value));
-  timeInput.value=String(now);
-  byId("clock").value=spanishTime.format(now)+" / 3,00 s";
-  paintParticles();draw();
+  now = Math.max(0, Math.min(duration, value));
+  timeInput.value = String(now);
+  byId("clock").value = duration ? `${spanishTime.format(now)} / ${spanishTime.format(duration)} s` : "0,00 s";
+  paintMaterial();
+  draw();
 }
+
 function loop(timestamp) {
   if (running && ready) {
     if(previous) setTime(now+(timestamp-previous)*.001*Number(byId("speed").value));
-    if(now>=TOTAL_TIME)setRunning(false);
+    if(now>=duration)setRunning(false);
   }
   previous=timestamp;
   requestAnimationFrame(loop);
@@ -209,36 +181,95 @@ async function fetchChecked(url,signal) {
   return response;
 }
 function selected(name) {return document.querySelector('input[name="'+name+'"]:checked').value;}
+function computeCase(parameters, signal) {
+  return new Promise((resolve, reject) => {
+    const task = new Worker(new URL("./bulk-worker.js?v=granel1", import.meta.url));
+    const result = [];
+    const abort = () => finish(() => reject(new DOMException("Carga cancelada", "AbortError")));
+    const finish = callback => {
+      signal.removeEventListener("abort", abort);
+      task.terminate();
+      callback();
+    };
+    signal.addEventListener("abort", abort, {once: true});
+    task.onmessage = ({data}) => {
+      switch (data.type) {
+        case "frame":
+          result.push(data);
+          break;
+        case "done":
+          finish(() => {
+            if (result.length < 2 || !data.duration) reject(Error("El cálculo no produjo un ciclo válido."));
+            else resolve({frames: result, duration: data.duration});
+          });
+          break;
+        case "error":
+          finish(() => reject(Error(data.message)));
+          break;
+      }
+    };
+    task.onerror = () => finish(() => reject(Error("El cálculo de la descarga se interrumpió.")));
+    task.postMessage(parameters);
+  });
+}
+
 async function loadCase() {
   if (!renderer) return;
-  const run=++revision;
+  const run = ++revision;
   activeRequest?.abort();
-  const controller=new AbortController(); activeRequest=controller;
-  const signal=controller.signal, h=variant.value;
-  const id="P"+h+"_D"+selected("grain")+"_H"+selected("water")+"_R"+selected("density");
-  ready=false;setRunning(false);tracks=[];
-  playButton.disabled=timeInput.disabled=byId("rewind").disabled=true;
-  if (model && model!==meshCache.get(h)) {scene.remove(model);model=null;}
-  byId("modelTitle").textContent=variant.selectedOptions[0].textContent;
-  byId("cadDownload").href="./assets/solidworks/tolva-"+h+".SLDPRT";
-  setTime(0);showStatus("Cargando modelo y simulación…");
+  const controller = new AbortController();
+  activeRequest = controller;
+  const h = variant.value;
+  const parameters = {
+    height: Number(h),
+    diameter: Number(selected("grain")),
+    moisture: Number(selected("water")),
+    density: Number(selected("density")),
+    mass: LOAD_MASS
+  };
+
+  ready = false;
+  setRunning(false);
+  frames = [];
+  frameIndex = 0;
+  duration = 0;
+  playButton.disabled = timeInput.disabled = byId("rewind").disabled = true;
+  if (model && model !== meshCache.get(h)) {
+    scene.remove(model);
+    model = null;
+  }
+  byId("modelTitle").textContent = variant.selectedOptions[0].textContent;
+  byId("cadDownload").href = "./assets/solidworks/tolva-" + h + ".SLDPRT";
+  setTime(0);
+  showStatus("Preparando la descarga de 1 tonelada…");
+
   try {
-    const [source,points]=await Promise.all([
-      meshCache.has(h)?null:fetchChecked("./assets/models/tolva-"+h+".json",signal).then(r=>r.json()),
-      dataCache.has(id)?dataCache.get(id):fetchChecked("./assets/data/"+id+".csv",signal).then(r=>r.text()).then(parseTracks)
-    ]);
-    if(run!==revision)return;
-    if(!meshCache.has(h))meshCache.set(h,meshFromFile(source));
-    if(model)scene.remove(model);
-    model=meshCache.get(h);scene.add(model);setTransparency();
-    tracks=points;dataCache.set(id,points);ready=true;
-    playButton.disabled=timeInput.disabled=byId("rewind").disabled=false;
-    setTime(0);showStatus("");
-  } catch(error) {
-    if(run!==revision || error.name==="AbortError")return;
-    showStatus("Error de carga. "+error.message,true);
+    const geometry = meshCache.has(h) ? Promise.resolve(meshCache.get(h))
+      : fetchChecked("./assets/models/tolva-" + h + ".json", controller.signal)
+        .then(r => r.json())
+        .then(meshFromFile);
+    const simulation = computeCase(parameters, controller.signal);
+    const [nextModel, cycle] = await Promise.all([geometry, simulation]);
+    if (run !== revision) return;
+    if (model) scene.remove(model);
+    model = nextModel;
+    meshCache.set(h, model);
+    scene.add(model);
+    setTransparency();
+    frames = cycle.frames;
+    duration = cycle.duration;
+    timeInput.max = String(duration);
+    ready = true;
+    playButton.disabled = timeInput.disabled = byId("rewind").disabled = false;
+    setTime(0);
+    showStatus("");
+  } catch (error) {
+    if (run !== revision || error.name === "AbortError") return;
+    controller.abort();
+    showStatus(error.message, true);
   }
 }
+
 try {
   initScene();
   variant.addEventListener("change",loadCase);
@@ -246,10 +277,9 @@ try {
   byId("retry").addEventListener("click",loadCase);
   byId("fit").addEventListener("click",resetView);
   transparent.addEventListener("change",setTransparency);
-  markers.addEventListener("change",()=>{paintParticles();draw();});
   timeInput.addEventListener("input",()=>{setRunning(false);setTime(Number(timeInput.value));});
   byId("rewind").addEventListener("click",()=>{setRunning(false);setTime(0);});
-  playButton.addEventListener("click",()=>{if(!running && now>=TOTAL_TIME)setTime(0);previous=performance.now();setRunning(!running);});
+  playButton.addEventListener("click",()=>{if(!running && now>=duration)setTime(0);previous=performance.now();setRunning(!running);});
   document.addEventListener("visibilitychange",()=>{if(document.hidden)setRunning(false);});
   loadCase();requestAnimationFrame(loop);
 } catch(error) {
