@@ -34,37 +34,9 @@ function parameters(opts) {
   };
 }
 
-function funnel(height) {
-  const signX = [-1, 1, 1, -1], signY = [-1, -1, 1, 1];
-  const top = signX.map((x, i) => [x * HALF, signY[i] * HALF, x < 0 ? 2.4 : LIP - height / 1000]);
-  const outlet = signX.map((x, i) => [x * 0.6, signY[i] * 0.4, OUTLET]);
-  const triangles = [];
-  function add(a, b, c) {
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const magnitude = Math.hypot(nx, ny, nz) * Math.sign(nz);
-    nx /= magnitude; ny /= magnitude; nz /= magnitude;
-    triangles.push({
-      ax: a[0], ay: a[1], az: a[2], ux, uy, vx, vy, det: ux * vy - uy * vx, nx, ny, nz,
-      xmin: Math.min(a[0], b[0], c[0]), xmax: Math.max(a[0], b[0], c[0]),
-      ymin: Math.min(a[1], b[1], c[1]), ymax: Math.max(a[1], b[1], c[1])
-    });
-  }
-  for (let i = 0; i < 4; i++) {
-    const j = (i + 1) % 4;
-    if (i === 2) {
-      add(top[j], top[i], outlet[i]); add(top[j], outlet[i], outlet[j]);
-    } else {
-      add(top[i], top[j], outlet[j]); add(top[i], outlet[j], outlet[i]);
-    }
-  }
-  return triangles;
-}
-
 function simulate(settings, send) {
   const p = parameters(settings);
-  const triangles = funnel(p.height);
+  const riseDifference = 0.900 - p.height / 1000;
   const x = new Float64Array(COUNT), y = new Float64Array(COUNT), z = new Float64Array(COUNT);
   const vx = new Float64Array(COUNT), vy = new Float64Array(COUNT), vz = new Float64Array(COUNT);
   const r = new Float64Array(COUNT), m = new Float64Array(COUNT);
@@ -87,11 +59,11 @@ function simulate(settings, send) {
     maxRadius = Math.max(maxRadius, r[i]);
     const lane = i % 20, layer = Math.floor(i / 20) % 3, wave = Math.floor(i / 60);
     release[i] = 0.012 + 0.069 * wave + 0.022 * random01(i, 36);
-    x[i] = (lane - 9.5) * 0.136 + 0.02 * (random01(i, 30) - 0.5) + 0.017 * Math.sin(0.7 * wave);
-    y[i] = -2.012 + 0.026 * (random01(i, 31) - 0.5);
+    y[i] = (lane - 9.5) * 0.136 + 0.02 * (random01(i, 30) - 0.5) + 0.017 * Math.sin(0.7 * wave);
+    x[i] = -2.012 + 0.026 * (random01(i, 31) - 0.5);
     z[i] = 3.799 + 0.115 * layer + 0.018 * (random01(i, 32) - 0.5);
-    vx[i] = 0.12 * (random01(i, 33) - 0.5);
-    vy[i] = 1.59 + 0.32 * random01(i, 34);
+    vy[i] = 0.12 * (random01(i, 33) - 0.5);
+    vx[i] = 1.59 + 0.32 * random01(i, 34);
     vz[i] = -0.43 - 0.22 * random01(i, 35);
   }
 
@@ -131,31 +103,54 @@ function simulate(settings, send) {
   }
 
   function contain(i) {
-    // The entire curtain originates outside −Y and clears the H beam before reaching the lip.
-    // Ignore the front collar on approach. After entry it blocks only below the open edge.
-    const rad = r[i];
-    if (z[i] - rad < 4.30 && z[i] > OUTLET - rad) {
-      wall(i, 1, 0, 0, -HALF + rad - x[i], p.wallFriction);
-      wall(i, -1, 0, 0, x[i] - HALF + rad, p.wallFriction);
-      wall(i, 0, -1, 0, y[i] - HALF + rad, p.wallFriction);
-      if (entered[i] && z[i] < LIP) wall(i, 0, 1, 0, -HALF + rad - y[i], p.wallFriction);
+    const px = x[i], py = y[i], pz = z[i], rad = r[i];
+    if (pz - rad < 4.30 && pz > OUTLET - rad) {
+      wall(i, -1, 0, 0, px - HALF + rad, p.wallFriction);
+      wall(i, 0, 1, 0, -HALF + rad - py, p.wallFriction);
+      wall(i, 0, -1, 0, py - HALF + rad, p.wallFriction);
+      if (entered[i] && pz < LIP) wall(i, 1, 0, 0, -HALF + rad - px, p.wallFriction);
     }
-    if (!entered[i] || z[i] > 3.30 + rad || z[i] < OUTLET - rad) return;
-    // A signed surface constraint, evaluated at the particle's projected point, is continuous
-    // even when one timestep crosses deeply into a panel. CAD seams use the exact CAD triangles.
-    for (const panel of triangles) {
-      const dx = x[i] - panel.ax, dy = y[i] - panel.ay, dz = z[i] - panel.az;
-      const normalDistance = panel.nx * dx + panel.ny * dy + panel.nz * dz;
-      if (normalDistance >= rad) continue;
-      const qx = x[i] - normalDistance * panel.nx, qy = y[i] - normalDistance * panel.ny;
-      if (qx < panel.xmin - 1e-8 || qx > panel.xmax + 1e-8 ||
-          qy < panel.ymin - 1e-8 || qy > panel.ymax + 1e-8) continue;
-      const qdx = qx - panel.ax, qdy = qy - panel.ay;
-      const u = (qdx * panel.vy - qdy * panel.vx) / panel.det;
-      const v = (panel.ux * qdy - panel.uy * qdx) / panel.det;
-      if (u >= -1e-7 && v >= -1e-7 && u + v <= 1.0000001) {
-        wall(i, panel.nx, panel.ny, panel.nz, rad - normalDistance, p.wallFriction + p.rollingLoss);
+    if (!entered[i] || z[i] > LIP + rad || z[i] < OUTLET - rad) return;
+    const friction = p.wallFriction + p.rollingLoss;
+
+    // Planar end panels. The projection test clips the plane to its actual trapezoid.
+    const sx = x[i] < 0 ? -1 : 1;
+    const slope = (0.8 + (sx > 0 ? riseDifference : 0)) / 1.125;
+    const invLength = 1 / Math.sqrt(1 + slope * slope);
+    const nx = -sx * slope * invLength, nz = invLength;
+    const distance = (z[i] - OUTLET - slope * (sx * x[i] - 0.600)) * nz;
+    if (distance < rad) {
+      const t = (sx * (x[i] - nx * distance) - 0.600) / 1.125;
+      if (t >= 0 && t <= 1 && Math.abs(y[i]) <= 0.400 + 1.325*t + 1e-8) {
+        wall(i, nx, 0, nz, rad - distance, friction);
       }
+    }
+
+    // These are the actual ruled side panels; the contact normal follows the continuous loft.
+    // S(x,y) = (x, y, 1.600 + t * (0.800 + delta * u)).
+    // Project the center to the local tangent, refit that tangent at the projected point,
+    // and iterate to obtain the perpendicular foot on the curved sheet.
+    const sy = y[i] < 0 ? -1 : 1;
+    if (Math.abs(y[i]) < 0.400 - rad) return;
+    let qx=x[i], qy=y[i], u=0, t=0, dx=0, dy=0, dz=1, d=0;
+    for (let pass=0; pass<4; pass++) {
+      t = (sy*qy - 0.400)/1.325;
+      if (t < -0.15 || t > 1.15) return;
+      const halfWidth = 0.600 + 1.125*t;
+      u = 0.5 + qx/(2*halfWidth);
+      const surfaceZ = OUTLET + t*(0.800 + riseDifference*u);
+      const fx = riseDifference*t/(2*halfWidth);
+      const fy = sy/1.325*(0.800 + riseDifference*u - t*riseDifference*qx*1.125/(2*halfWidth*halfWidth));
+      dz = 1/Math.sqrt(1 + fx*fx + fy*fy);
+      dx = -fx*dz; dy = -fy*dz;
+      d = (x[i]-qx)*dx + (y[i]-qy)*dy + (z[i]-surfaceZ)*dz;
+      if (pass === 0 && d > rad + 0.015) return;
+      const xNext = x[i] - d*dx, yNext = y[i] - d*dy;
+      if (Math.abs(xNext-qx) + Math.abs(yNext-qy) < 1e-8) break;
+      qx=xNext; qy=yNext;
+    }
+    if (d < rad && t >= -1e-8 && t <= 1+1e-8 && u >= -1e-8 && u <= 1+1e-8) {
+      wall(i, dx, dy, dz, rad-d, friction);
     }
   }
 
@@ -224,7 +219,7 @@ function simulate(settings, send) {
       vz[i]-=GRAVITY*STEP;
       x[i]+=vx[i]*STEP; y[i]+=vy[i]*STEP; z[i]+=vz[i]*STEP;
       if(state[i]===1) {
-        if(!entered[i] && y[i]>=-HALF) {entered[i]=1;approach-=m[i];}
+        if(!entered[i] && x[i]>=-HALF) {entered[i]=1;approach-=m[i];}
         contain(i);
         if(z[i]<=OUTLET) {
           if(entered[i] && Math.abs(x[i])<=0.60001 && Math.abs(y[i])<=0.40001) {

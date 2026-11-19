@@ -1,192 +1,241 @@
 import * as THREE from "three";
 
-// Each parcel carries its physical position and equivalent-volume radius in metres.
-// Repeated frames keep one slot per parcel, including slots with radius zero.
-const SHAPES = 8;
-const VOLUME_UNIT_SPHERE = 4 * Math.PI / 3;
-const PALETTE = [0x25282a, 0x292b2e, 0x303337, 0x35373a, 0x2c2e31, 0x383a3d, 0x25272b, 0x404144];
-
+// Transport slots carry the centroid and equivalent radius of a parcel, in metres.
+// They are never drawn. A density field supplies the bulk interior, while sub-grain
+// samples supply the true-scale edge and dilute stream without proxy particle meshes.
+const SAMPLES = 768;
+const NX = 76, NY = 76, NZ = 68;
+const ISO = 70 / 255;
 function randomSource(seed) {
-  let n = seed >>> 0;
-  return () => {
-    n = (Math.imul(1664525, n) + 1013904223) >>> 0;
-    return n / 4294967296;
-  };
+  let n=seed>>>0;
+  return () => { n=(Math.imul(n,1664525)+1013904223)>>>0; return n/4294967296; };
 }
-
-function makeStone(index) {
-  const rand = randomSource(56927 + 1381 * index);
-  const count = 7 + index % 2;
-  const width = .98 + .20 * rand(), depth = .80 + .20 * rand(), height = .71 + .18 * rand();
-  const points = [], faces = [], tones = [];
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-  const normal = new THREE.Vector3(), centre = new THREE.Vector3(), cross = new THREE.Vector3();
-  let volume = 0;
-
-  // Three irregular rings form broad fracture planes and chipped edges.
-  const ringParameters = Array.from({length:count}, (_, i) => ({
-    angle:2 * Math.PI * (i + (rand() - .5) * .45) / count,
-    radius:.81 + .28 * rand()
-  }));
-  const offset = rand() * 2 * Math.PI;
-  for (let level = 0; level < 3; level++) {
-    for (const vertex of ringParameters) {
-      const shrink = level === 1 ? 1 : .48 + .34 * rand();
-      const angle = offset + vertex.angle + (level === 1 ? 0 : (rand() - .5) * .23);
-      const x = width * shrink * vertex.radius * Math.cos(angle);
-      const y = depth * shrink * vertex.radius * Math.sin(angle);
-      const z = height * ((level - 1) * (.76 + .13 * rand()) + (rand() - .5) * .29) + x * .10 - y * .07;
-      points.push(new THREE.Vector3(x, y, z));
-    }
-  }
-  points.push(new THREE.Vector3(.08, -.09, -height * (.88 + .1 * rand())));
-  points.push(new THREE.Vector3(-.10, .07, height * (.89 + .11 * rand())));
-  function triangle(i, j, k, tone) {
-    a.copy(points[i]); b.copy(points[j]); c.copy(points[k]);
-    normal.crossVectors(new THREE.Vector3().subVectors(b,a), new THREE.Vector3().subVectors(c,a));
-    centre.copy(a).add(b).add(c);
-    if (normal.dot(centre) < 0) { b.copy(points[k]); c.copy(points[j]); }
-    volume += a.dot(cross.crossVectors(b,c)) / 6;
-    for (const v of [a,b,c]) {
-      faces.push(v.x,v.y,v.z);
-      tones.push(tone,tone,tone);
-    }
-  }
-  for (let i = 0; i < count; i++) {
-    const j = (i + 1) % count;
-    for (let level = 0; level < 2; level++) {
-      const p = level * count, q = p + count;
-      const tone = .80 + rand() * .19;
-      triangle(p+i,p+j,q+j,tone);
-      triangle(p+i,q+j,q+i,tone * (.95 + .07 * rand()));
-    }
-    triangle(3*count, j, i, .84 + .14 * rand());
-    triangle(3*count+1, 2*count+i, 2*count+j, .88 + .12 * rand());
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(faces,3));
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(tones,3));
-  const scale = Math.cbrt(VOLUME_UNIT_SPHERE / volume);
-  geometry.scale(scale,scale,scale);
-  geometry.computeVertexNormals();
-  return geometry;
+function volumeTexture(data,x,y,z) {
+  const t=new THREE.Data3DTexture(data,x,y,z);
+  t.format=THREE.RedFormat; t.magFilter=t.minFilter=THREE.LinearFilter;
+  t.unpackAlignment=1;t.needsUpdate=true;
+  return t;
 }
-
-function applyGranularSurface(material) {
-  // One repeatable scalar volume. Mipmapping removes subpixel shimmer while the pile moves.
-  const size = 32, samples = new Uint8Array(size**3);
-  const rand = randomSource(79391);
-  for (let i=0; i<samples.length; i++) samples[i]=Math.floor(256*rand());
-  const field = new THREE.Data3DTexture(samples,size,size,size);
-  field.format = THREE.RedFormat;
-  field.wrapS = field.wrapT = field.wrapR = THREE.RepeatWrapping;
-  field.magFilter = THREE.LinearFilter;
-  field.minFilter = THREE.LinearMipmapLinearFilter;
-  field.generateMipmaps = true;
-  field.needsUpdate = true;
-  material.onBeforeCompile = shader => {
-    shader.uniforms.coalField = {value:field};
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vCoalMetres;")
-      .replace("#include <begin_vertex>", `#include <begin_vertex>
-        vec3 basisX = instanceMatrix[0].xyz;
-        vCoalMetres = position * length(basisX) + normalize(basisX) * 0.28;
-      `);
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform highp sampler3D coalField;\nvarying vec3 vCoalMetres;")
-      .replace("#include <color_fragment>", `#include <color_fragment>
-        // Cell widths in metres. Texture coordinates travel with each parcel.
-        float aggregate = texture(coalField, vCoalMetres / (32.0*0.012)).r - 0.5;
-        float grain = texture(coalField, vCoalMetres / (32.0*0.0048)).r - 0.5;
-        float fines = texture(coalField, vCoalMetres / (32.0*0.0016)).r - 0.5;
-        diffuseColor.rgb *= 1.0 + 0.35*aggregate + 1.15*grain + 0.65*fines;
-        float relief = grain*0.00065 + fines*0.00017;
-      `)
-      .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
-        vec3 coalDx = dFdx(-vViewPosition), coalDy = dFdy(-vViewPosition);
-        vec3 coalU = cross(coalDy,normal), coalV = cross(normal,coalDx);
-        float coalDet = dot(coalDx,coalU);
-        if(abs(coalDet)>1e-14) {
-          normal=normalize(normal-(dFdx(relief)*coalU+dFdy(relief)*coalV)/coalDet);
-        }
-      `);
-  };
-  material.customProgramCacheKey = () => "coal-granular-surface-v1";
-  return field;
-}
-
-export function createBulkMaterial(scene, {capacity=4500, seed=7591}={}) {
-  const group = new THREE.Group();
-  group.name = "Antracita a granel";
-  const mineral = new THREE.MeshPhongMaterial({
-    color:0xffffff, vertexColors:true, flatShading:true,
-    specular:0x141619, shininess:12
-  });
-  const grainField = applyGranularSurface(mineral);
-  const geometries = Array.from({length:SHAPES}, (_, i) => makeStone(i));
-  const rand = randomSource(seed);
-  const colours = PALETTE.map(hex => new THREE.Color(hex));
-  const baseTransforms = [], shadeIndices = [];
-  const perShapeCount = new Uint32Array(SHAPES);
-  const quaternion = new THREE.Quaternion();
-  const rotation = new THREE.Matrix4(), matrix = new THREE.Matrix4();
-  let meshes = [], maxSlots = 0;
-  function allocate(total) {
-    if (total <= maxSlots) return;
-    // Keep orientation and shade tied to the input slot, even after a particle leaves.
-    for (let i = maxSlots; i < total; i++) {
-      const u = rand(), a = 2*Math.PI*rand(), b = 2*Math.PI*rand();
-      quaternion.set(Math.sqrt(1-u)*Math.sin(a), Math.sqrt(1-u)*Math.cos(a),
-                     Math.sqrt(u)*Math.sin(b), Math.sqrt(u)*Math.cos(b));
-      rotation.makeRotationFromQuaternion(quaternion);
-      const e = rotation.elements;
-      baseTransforms.push([e[0],e[1],e[2],e[4],e[5],e[6],e[8],e[9],e[10]]);
-      shadeIndices.push(Math.floor(rand() * colours.length));
-    }
-    for (const mesh of meshes) { group.remove(mesh); mesh.dispose(); }
-    meshes = geometries.map((geometry,i) => {
-      const mesh = new THREE.InstancedMesh(geometry,mineral,Math.ceil(total/SHAPES));
-      mesh.name = "Fragmentos de antracita "+(i+1);
-      mesh.frustumCulled = false;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.setColorAt(0,colours[0]);
-      mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-      mesh.count=0; group.add(mesh); return mesh;
-    });
-    maxSlots=total;
+const vesselClip = `
+  uniform float collar, clipVessel;
+  bool crossesWall(vec3 p) {
+    if(clipVessel<0.5 || p.z<1.6 || p.z>3.3) return false;
+    float rise=3.3-collar-2.4;
+    float xmin=-0.6-1.125*clamp((p.z-1.6)/0.8,0.0,1.0);
+    float xmax=0.6+1.125*clamp((p.z-1.6)/(0.8+rise),0.0,1.0);
+    if(p.x<xmin || p.x>xmax || abs(p.y)>1.725) return true;
+    float y=abs(p.y);
+    if(y<=0.4) return false;
+    float v=(y-0.4)/1.325;
+    float u=clamp(.5+p.x/(1.2+2.25*v),0.0,1.0);
+    float wall=1.6+v*(.8+rise*u);
+    return p.z<wall;
   }
-  allocate(Math.max(1,Math.ceil(capacity)));
-  scene.add(group);
-
-  function update(packed, count=packed.length/4) {
-    const n = Math.min(Math.floor(count),Math.floor(packed.length/4));
-    allocate(n);
-    perShapeCount.fill(0);
-    for (let i=0; i<n; i++) {
-      const j=4*i, x=packed[j], y=packed[j+1], z=packed[j+2], r=packed[j+3];
-      if (!(r>0) || !Number.isFinite(x+y+z+r)) continue;
-      const shape=i%SHAPES, target=perShapeCount[shape]++;
-      const basis=baseTransforms[i], elements=matrix.elements;
-      for (let col=0; col<3; col++) {
-        for (let row=0; row<3; row++) elements[4*col+row]=basis[3*col+row]*r;
+`;
+const surfaceVertex=`
+  varying vec3 world;
+  void main(){world=(modelMatrix*vec4(position,1.0)).xyz;gl_Position=projectionMatrix*viewMatrix*vec4(world,1.0);}
+`;
+const surfaceFragment=`
+  precision highp float;
+  uniform highp sampler3D densityField, grainField;
+  uniform vec3 origin, worldSize, low, high, eyeAxis;
+  uniform float voxel, maxDiameter, pixelMetres, ortho;
+  uniform mat4 clipMatrix;
+  varying vec3 world;
+  ${vesselClip}
+  const float threshold=${ISO.toFixed(8)};
+  float density(vec3 p){return texture(densityField,(p-origin)/worldSize).r;}
+  float grain(vec3 pos,float stepMetres){
+    vec3 uv=pos/(32.0*stepMetres);
+    return textureLod(grainField,uv,max(0.0,log2(max(1.0,pixelMetres/stepMetres)))).r-.5;
+  }
+  void main(){
+    vec3 dir=ortho>0.5?eyeAxis:normalize(world-cameraPosition);
+    float stride=voxel*.66;
+    vec3 p=world+dir*.00002;
+    // The front-face of the active field is the entry point of the view ray.
+    // Orthographic zeros require an explicit parallel component.
+    vec3 inv=vec3(dir.x>=0.0?1.0:-1.0,dir.y>=0.0?1.0:-1.0,dir.z>=0.0?1.0:-1.0)/max(abs(dir),vec3(.000001));
+    vec3 end=max((low-p)*inv,(high-p)*inv);
+    float distance=min(end.x,min(end.y,end.z)), prev=density(p), travelled=0.0;
+    bool found=false;
+    for(int i=0;i<230;i++){
+      if(travelled>distance+.001)break;
+      float d=density(p);
+      if(d>=threshold && !crossesWall(p)){
+        float back=(d>prev+.00001)?clamp((d-threshold)/(d-prev),0.0,1.0):0.0;
+        vec3 refined=p-dir*back*stride;
+        if(!crossesWall(refined))p=refined;
+        found=true;break;
       }
-      matrix.setPosition(x,y,z);
-      meshes[shape].setMatrixAt(target,matrix);
-      meshes[shape].setColorAt(target,colours[shadeIndices[i]]);
+      prev=d;p+=dir*stride;travelled+=stride;
     }
-    for (let i=0; i<SHAPES; i++) {
-      const mesh=meshes[i];
-      mesh.count=perShapeCount[i]; mesh.instanceMatrix.needsUpdate=true; mesh.instanceColor.needsUpdate=true;
-    }
+    if(!found)discard;
+    float h=voxel*.8;
+    vec3 n=vec3(density(p-vec3(h,0,0))-density(p+vec3(h,0,0)),
+                density(p-vec3(0,h,0))-density(p+vec3(0,h,0)),
+                density(p-vec3(0,0,h))-density(p+vec3(0,0,h)));
+    n=length(n)>.00001?normalize(n):-dir;
+    float broad=grain(p,.011), grit=grain(p,maxDiameter*.76), fine=grain(p,maxDiameter*.24);
+    float light=.69+.36*max(0.0,dot(n,normalize(vec3(-.45,-.58,.74))))+.12*max(0.0,dot(n,normalize(vec3(.53,.64,.55))));
+    float shade=light*(.193 + .043*broad + .098*grit + .059*fine);
+    gl_FragColor=vec4(shade*.95,shade*.98,shade,1.0);
+    vec4 clip=clipMatrix*vec4(p,1.0);gl_FragDepth=.5*(clip.z/clip.w+1.0);
   }
-  function dispose() {
-    group.removeFromParent();
-    for (const mesh of meshes) mesh.dispose();
-    for (const geometry of geometries) geometry.dispose();
-    grainField.dispose();
-    mineral.dispose();
-    group.clear();
+`;
+const pointsVertex=`
+  attribute vec4 parcel;attribute float slotSeed;
+  attribute vec2 sizeTone;
+  uniform float pixelsPerMetre, maxDiameter, ortho, sampleWeight;
+  varying float tone, coverage;varying vec3 world;
+  void main(){
+    float c=cos(slotSeed),s=sin(slotSeed);
+    vec3 offset=position;
+    offset.xy=mat2(c,s,-s,c)*offset.xy;
+    if(fract(slotSeed*.31)>.5)offset.z=-offset.z;
+    world=parcel.xyz+offset*parcel.w;
+    vec4 mv=viewMatrix*vec4(world,1.0);
+    float dia=maxDiameter*sizeTone.x;
+    float pixels=dia*pixelsPerMetre/(ortho>.5?1.0:max(.001,-mv.z));
+    // At subpixel scales a projected disk contributes its true fractional coverage.
+    // LOD weights only merge subpixel samples; resolved grain diameters never grow.
+    coverage=min(1.0,pixels*pixels*.785398*sampleWeight);
+    tone=sizeTone.y;
+    gl_PointSize=max(1.0,pixels);
+    gl_Position=projectionMatrix*mv;
   }
-  return {group,update,setVisible(visible){group.visible=Boolean(visible);},dispose};
-}
+`;
+const pointsFragment=`
+  varying float tone,coverage;varying vec3 world;
+  ${vesselClip}
+  void main(){
+    if(crossesWall(world))discard;
+    vec2 q=gl_PointCoord*2.0-1.0;float r2=dot(q,q);
+    if(r2>1.0)discard;
+    float light=.78+.22*sqrt(max(0.0,1.0-r2))+.1*(-q.x+q.y);
+    float s=(.114+.125*tone)*light;
+    gl_FragColor=vec4(s*.96,s*.98,s,coverage);
+  }
+`;
 
+export function createBulkMaterial(scene,{capacity=1200,seed=7591}={}) {
+  const group=new THREE.Group();group.name="Antracita fina a granel";scene.add(group);
+  const rand=randomSource(seed), field=new Uint8Array(NX*NY*NZ);
+  const densityField=volumeTexture(field,NX,NY,NZ);
+  const grains=new Uint8Array(32**3);
+  for(let i=0;i<grains.length;i++)grains[i]=Math.floor(256*rand());
+  const grainField=volumeTexture(grains,32,32,32);
+  grainField.wrapS=grainField.wrapT=grainField.wrapR=THREE.RepeatWrapping;
+  grainField.minFilter=THREE.LinearMipmapLinearFilter;grainField.generateMipmaps=true;
+  const low=new THREE.Vector3(),high=new THREE.Vector3(),origin=new THREE.Vector3(),worldSize=new THREE.Vector3();
+  const cameraDirection=new THREE.Vector3(), clipMatrix=new THREE.Matrix4(), viewport=new THREE.Vector2();
+  const common={maxDiameter:{value:.003},collar:{value:.9},clipVessel:{value:0},ortho:{value:1}};
+  const surfaceUniforms={...common,densityField:{value:densityField},grainField:{value:grainField},origin:{value:origin},worldSize:{value:worldSize},
+    low:{value:low},high:{value:high},eyeAxis:{value:cameraDirection},voxel:{value:.048},clipMatrix:{value:clipMatrix},pixelMetres:{value:.005}};
+  const surfaceMat=new THREE.ShaderMaterial({uniforms:surfaceUniforms,vertexShader:surfaceVertex,fragmentShader:surfaceFragment});
+  const surface=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),surfaceMat);
+  surface.visible=false;surface.name="Continuo de densidad";group.add(surface);
+  const geo=new THREE.InstancedBufferGeometry();
+  const offsets=new Float32Array(SAMPLES*3),sizes=new Float32Array(SAMPLES*2);
+  for(let i=0;i<SAMPLES;i++){
+    // A smoothly tapered distribution has no spherical boundary for an isolated parcel.
+    // Use a deterministic sample layout, scrambled separately for each slot.
+    for(let k=0;k<3;k++)offsets[3*i+k]=(rand()+rand()+rand()-1.5)*(k===2?1.26:1.17);
+    sizes[2*i]=.025+.975*rand()**.62;sizes[2*i+1]=rand();
+  }
+  geo.setAttribute("position",new THREE.BufferAttribute(offsets,3));
+  geo.setAttribute("sizeTone",new THREE.BufferAttribute(sizes,2));
+  let storage=0,particles,seeds;
+  function reserve(n){
+    if(n<=storage)return;
+    storage=Math.max(n,capacity,1);
+    particles=new THREE.InstancedBufferAttribute(new Float32Array(storage*4),4).setUsage(THREE.DynamicDrawUsage);
+    seeds=new THREE.InstancedBufferAttribute(new Float32Array(storage),1).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("parcel",particles);geo.setAttribute("slotSeed",seeds);
+  }
+  reserve(capacity);geo.instanceCount=0;
+  const pointUniforms={...common,pixelsPerMetre:{value:1},sampleWeight:{value:1}};
+  const pointMat=new THREE.ShaderMaterial({uniforms:pointUniforms,vertexShader:pointsVertex,fragmentShader:pointsFragment,
+    transparent:true,depthTest:true,depthWrite:false});
+  const cloud=new THREE.Points(geo,pointMat);
+  cloud.frustumCulled=false;cloud.name="Granos a diámetro real";group.add(cloud);
+  const viewportParams=(renderer,camera)=>{
+    renderer.getDrawingBufferSize(viewport);
+    common.ortho.value=camera.isOrthographicCamera?1:0;
+    return .5*viewport.y*camera.projectionMatrix.elements[5];
+  };
+  surface.onBeforeRender=(renderer,_scene,camera)=>{
+    const ppm=viewportParams(renderer,camera);
+    camera.getWorldDirection(cameraDirection);clipMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+    surfaceUniforms.pixelMetres.value=1/ppm;
+  };
+  cloud.onBeforeRender=(renderer,_scene,camera)=>{
+    const ppm=viewportParams(renderer,camera);pointUniforms.pixelsPerMetre.value=ppm;
+    const estPixels=ppm*common.maxDiameter.value/(camera.isOrthographicCamera?1:Math.max(.2,camera.position.distanceTo(surface.position)));
+    const samples=estPixels<.72?160:estPixels<1?384:SAMPLES;
+    geo.setDrawRange(0,samples);pointUniforms.sampleWeight.value=SAMPLES/samples;
+  };
+  function update(packed,count=packed.length/4){
+    const n=Math.min(Math.floor(count),Math.floor(packed.length/4));reserve(n);
+    low.set(Infinity,Infinity,Infinity);high.set(-Infinity,-Infinity,-Infinity);
+    let live=0;
+    for(let i=0;i<n;i++){
+      const j=i*4,x=packed[j],y=packed[j+1],z=packed[j+2],r=packed[j+3];
+      if(!(r>0) || !Number.isFinite(x+y+z+r))continue;
+      const k=live*4;particles.array[k]=x;particles.array[k+1]=y;particles.array[k+2]=z;particles.array[k+3]=r;
+      seeds.array[live]=((Math.imul(i+1,2654435761) ^ seed)>>>0)*1.46291808e-9;
+      live++;
+      const margin=4*r+.065;
+      low.x=Math.min(low.x,x-margin);low.y=Math.min(low.y,y-margin);low.z=Math.min(low.z,z-margin);
+      high.x=Math.max(high.x,x+margin);high.y=Math.max(high.y,y+margin);high.z=Math.max(high.z,z+margin);
+    }
+    geo.instanceCount=live;particles.needsUpdate=true;seeds.needsUpdate=true;
+    cloud.visible=live>0;surface.visible=live>=3;
+    if(!surface.visible)return;
+    // A compact C1 kernel on a physical grid. Its maximum contribution per parcel is
+    // 32, below 70 even for two overlapping centroids. Isolated slots cannot form rocks.
+    const step=Math.max(.046,(high.x-low.x)/(NX-3),(high.y-low.y)/(NY-3),(high.z-low.z)/(NZ-3));
+    origin.set(Math.floor(low.x/step)*step,Math.floor(low.y/step)*step,Math.floor(low.z/step)*step);
+    worldSize.set(NX*step,NY*step,NZ*step);surfaceUniforms.voxel.value=step;
+    surface.position.addVectors(low,high).multiplyScalar(.5);surface.scale.subVectors(high,low);
+    field.fill(0);
+    const row=NX,plane=NX*NY, data=particles.array;
+    let hasDense=false;
+    for(let i=0;i<live;i++){
+      const j=4*i,gx=(data[j]-origin.x)/step-.5,gy=(data[j+1]-origin.y)/step-.5,gz=(data[j+2]-origin.z)/step-.5;
+      const radius=3.7*data[j+3]/step,rsq=radius*radius;
+      const x0=Math.max(0,Math.ceil(gx-radius)),x1=Math.min(NX-1,Math.floor(gx+radius));
+      const y0=Math.max(0,Math.ceil(gy-radius)),y1=Math.min(NY-1,Math.floor(gy+radius));
+      const z0=Math.max(0,Math.ceil(gz-radius)),z1=Math.min(NZ-1,Math.floor(gz+radius));
+      for(let z=z0;z<=z1;z++){
+        const dz2=(z-gz)*(z-gz),zi=z*plane;
+        for(let y=y0;y<=y1;y++){
+          const dyz2=dz2+(y-gy)*(y-gy),base=zi+y*row;
+          if(dyz2>=rsq)continue;
+          for(let x=x0;x<=x1;x++){
+            const w=1-((x-gx)*(x-gx)+dyz2)/rsq;
+            if(w<=0)continue;
+            const k=base+x,v=field[k]+Math.round(32*w*w);
+            field[k]=Math.min(255,v);if(v>=70)hasDense=true;
+          }
+        }
+      }
+    }
+    surface.visible=hasDense;
+    if(hasDense)densityField.needsUpdate=true;
+  }
+  function setGrainSize(mm){
+    if(mm!==3 && mm!==6)throw RangeError("La granulometría admite 3 o 6 mm.");
+    common.maxDiameter.value=mm*.001;
+  }
+  function setHopperHeight(mm){
+    if(![200,300,900].includes(mm))throw RangeError("Variante de tolva desconocida.");
+    common.collar.value=mm*.001;common.clipVessel.value=1;
+  }
+  function dispose(){
+    group.removeFromParent();surface.geometry.dispose();surfaceMat.dispose();geo.dispose();pointMat.dispose();
+    densityField.dispose();grainField.dispose();group.clear();
+  }
+  return {group,update,setGrainSize,setHopperHeight,setVisible(visible){group.visible=Boolean(visible);},dispose};
+}
