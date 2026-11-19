@@ -44,3 +44,16 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
+
+.company-logo {
+  display: block;
+  width: 174px;
+  height: auto;
+  padding: 6px 9px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+@media (max-width: 680px) {
+  .company-logo { width: clamp(112px, 34vw, 152px); }
+}
